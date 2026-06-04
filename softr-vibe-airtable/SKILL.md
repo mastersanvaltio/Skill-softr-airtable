@@ -87,18 +87,18 @@ import { useCurrentUser } from "@/lib/user";
 const currentUser = useCurrentUser();
 const userEmail = currentUser?.email || "";
 
-// Uso con campo personalizado de la tabla de usuarios Softr
-// (cuando el campo "Email" tiene nombre interno diferente, ej. "xehUT")
+// Uso con campos personalizados de la tabla de usuarios en Airtable.
+// El lado derecho es el NOMBRE (label) del campo, no un Field ID ni un ID interno.
 const currentUser = useCurrentUser({
   properties: {
-    customEmail: "xehUT",   // nombre interno del campo en extendedState.user.availableProperties
+    nombre: "Nombre",   // label exacto del campo en availableProperties[].label
+    cedula: "Cédula",
   },
 });
-const userEmail =
-  currentUser?.email ||
-  (typeof currentUser?.properties?.customEmail === "string"
-    ? currentUser.properties.customEmail
-    : "");
+const nombreTecnico =
+  typeof currentUser?.properties?.nombre === "string"
+    ? currentUser.properties.nombre
+    : currentUser?.fullName || "";
 ```
 
 **Reglas:**
@@ -106,6 +106,71 @@ const userEmail =
 - La propiedad estándar es `email` (minúscula). `Email` con mayúscula **no existe**.
 - Para campos personalizados del perfil Softr, usar `properties: { alias: "nombreInterno" }` y leer con `currentUser?.properties?.alias`.
 - Para el caso Welldone: `currentUser?.email` devuelve el correo con el que el empleado inició sesión — suficiente para crear links a BD empleados via `[{ id: email, label: email }]`.
+
+### `user.id` — Record ID del usuario en Airtable
+
+Cuando la app de Softr tiene **User sync** habilitado (tabla de usuarios conectada a una tabla de Airtable), `user.id` devuelve el `recXXX` del registro del usuario en esa tabla. Esto permite auto-rellenar campos `multipleRecordLinks` con el usuario actual **sin que el usuario tenga que seleccionarse de una lista**.
+
+```js
+import { useCurrentUser } from "@/lib/user";
+
+const user = useCurrentUser();
+
+// user.id  → "recXXXXXXXXXXXXX" (Record ID en Airtable) — solo si User sync está habilitado
+// user.email     → email del usuario logueado
+// user.fullName  → nombre completo
+// user.firstName / user.lastName
+// user.avatar    → URL del avatar
+```
+
+**Patrón: auto-rellenar un campo `multipleRecordLinks` con el usuario logueado**
+
+```js
+// En el payload de useRecordCreate:
+// multipleRecordLinks → flat array de strings (formato canónico para create)
+if (user?.id) {
+  fields.persona = [user.id];
+}
+```
+
+> ⚠️ **Usar flat array de strings** (`[user.id]`), NO `[{ id: user.id, label: "..." }]`.
+> El formato objeto puede fallar silenciosamente en `useRecordCreate` para `multipleRecordLinks`.
+
+**Acceder a campos personalizados de la tabla de usuarios en Airtable:**
+
+El lado derecho de `properties` es el **nombre (label) exacto del campo** tal como aparece en `availableProperties[].label`. **No uses Field IDs de Airtable ni IDs internos.**
+
+```js
+// ✅ CORRECTO — usar el nombre del campo (label)
+const user = useCurrentUser({
+  properties: {
+    nombre:      "Nombre",        // alias: label exacto
+    cedula:      "Cédula",
+    cargo:       "Cargo",
+    area:        "Área",
+    valorXDia:   "Valor x día",
+  },
+});
+
+const nombreTecnico = typeof user?.properties.nombre === "string"
+  ? user.properties.nombre
+  : user?.fullName || "";
+
+// ❌ INCORRECTO — no uses Field IDs ni IDs internos de Softr
+const user = useCurrentUser({
+  properties: {
+    nombre: "fldXXXXX",  // ❌ Field ID de Airtable — no funciona
+    correo: "ddSsS",     // ❌ ID interno de Softr — no funciona
+  },
+});
+```
+
+**Cuándo `user.id` es null:**
+- User sync **no está habilitado** en la app de Softr.
+- La tabla de usuarios no está conectada a Airtable.
+- El usuario no está autenticado.
+
+En esos casos, como fallback mostrar un selector manual o dejar el campo vacío.
 
 ## Available libraries
 
@@ -458,20 +523,34 @@ const allRecords = (data?.pages || []).flatMap(p => p.items || []);
 ### Always use a separate write-fields select
 
 ```js
+// ⚠️ DECLARE BOTH AT MODULE LEVEL — never inside Block().
+//    Inside Block() they get re-created each render, which causes
+//    useRecord/useRecordUpdate to thrash and mutations to fail silently
+//    (no error, no log — the .mutate() call simply does nothing).
+
 const select = q.select({ /* all read fields */ });
 const writeFields = q.select({ /* only fields you'll mutate */ });
 
-const updateRecord = useRecordUpdate({
-  fields: writeFields,
-  async onSuccess() {
-    await refetch();
-    setTimeout(() => refetch(), 2000);  // formulas recalc slowly
-    setTimeout(() => refetch(), 5000);
-  }
-});
+export default function Block() {
+  const { data, status, refetch } = useRecord({ recordId, select });
 
-updateRecord.mutate({ recordId, fields: { campo: valor } });
+  const updateRecord = useRecordUpdate({
+    fields: writeFields,
+    async onSuccess() {
+      await refetch();
+      setTimeout(() => refetch(), 2000);  // formulas recalc slowly
+      setTimeout(() => refetch(), 5000);
+    }
+  });
+
+  updateRecord.mutate({ recordId, fields: { campo: valor } });
+}
 ```
+
+**Symptom of breaking this rule:** the block renders fine and reads data,
+but every inline edit / drop / create / delete is silent — UI behaves as if
+nothing happened, no console error, no network request rejected. Moving
+both selects out of `Block()` immediately restores all mutations.
 
 ### Softr's strict linter on `q.select()` — two non-negotiable rules
 

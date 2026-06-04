@@ -5,6 +5,7 @@
 **Base ID (Portal Empresarial Welldone):** `appAEV0iaC3VfB5Zb`
 **Base ID (Gestión Tareas):** `appKb51aF3l8aB8Fn`
 **Base ID (Toma de Requerimientos):** `appk8ZBGkmqabmzyN`
+**Base ID (Planeador Cotizaciones):** `appSXTDQV4ZjFiGY0`
 **Nombre:** Portal Empresarial Welldone
 **URL portal cliente:** `https://Portalclienteservicio.softr.app`
 **URL portal interno:** `https://portalwelldone.softr.app`
@@ -638,6 +639,9 @@ Esta base es independiente de la base principal (Portal Empresarial Welldone). C
 |---|---|
 | Solicitudes | `tblLE1ydloydn7rlT` |
 | Gestión Tareas | `tbllgJ2HPb2fYEX1n` |
+| Agenda | `tblPi2hORWogPP1NV` |
+| Usuario Config | `tblWNtdxwTjdLkcDr` |
+| Conexiones | `tblAtAaz4u3SAPy8P` |
 | BD empleados | `tbls0LijWIY4q1hyz` |
 | Proyecto (sync) | `tblaZPV6OfCk4knts` |
 | Cotizaciones (sync) | `tblkxVqfSGEDGVSit` |
@@ -859,11 +863,6 @@ Tabla principal de tareas internas de la empresa (comercial, tecnología, proyec
 
 ---
 
-
-Primero necesito obtener los IDs de los campos de la tabla para luego consultar el schema completo.Necesito primero listar las tablas para obtener los IDs de los campos. Déjame buscar esa herramienta.Voy a usar `list_tables_for_base` para obtener los campos de la tabla Agenda.Tengo los campos de la tabla **Agenda**. Ahora necesito obtener el schema completo para los campos de tipo `singleSelect` para ver sus opciones.Tengo todo lo que necesito. Aquí está la tabla completa con los campos de la tabla **Agenda** y las sub-tablas para los campos de selección:
-
----
-
 ## Campos de la tabla: Agenda (`tblPi2hORWogPP1NV`)
 
 | Nombre | ID | Tipo |
@@ -871,6 +870,7 @@ Primero necesito obtener los IDs de los campos de la tabla para luego consultar 
 | ID | `fldaJSpk0wKYxdgts` | autoNumber |
 | Usuario | `fldx6idIKkuQ4KEPx` | multipleRecordLinks |
 | Columna | `fldm3zcCvUWIxtZY4` | singleSelect |
+| Columna Custom | `fldUofhJxFngIr1P2` | singleText |
 | Nombre | `fld3mr1czG5IHY7L7` | singleLineText |
 | Descripción | `flduyxQnnxzewkuL2` | richText |
 | Categoría | `fldMf3xNzwRzfXmAn` | singleSelect |
@@ -878,6 +878,11 @@ Primero necesito obtener los IDs de los campos de la tabla para luego consultar 
 | Documentos | `fldE9qTSizRiWp4XR` | multipleAttachments |
 | Config Checks | `fldrgdWFhkLQvGJiC` | multilineText |
 | Config URLs | `fldUE8KzMHEduUrOu` | multilineText |
+| Conexiones | `fldMB6Ym75N8PZvgp` | multipleRecordLinks → Conexiones |
+| Asignado a | `fldeq5McOWAiFkbaT` | multilineText (JSON array de emails) |
+| Orden Agenda | `fldNoO0Pl1Y2Z4ItI` | number — orden global dentro de la columna de agenda (escribible) |
+| Orden Custom | `fldG0OKg70BGOL9hv` | multilineText — JSON map `{ "recTableroXXX": 1.5 }` — orden per-tablero. Si una tarjeta no tiene entrada para el tablero, los kanbans usan `ID*1000` como fallback (mismo criterio que Orden Agenda Formula) |
+| Orden Agenda Formula | `fldkE9M1C9P5pgcvo` | formula — `IF({Orden Agenda}, {Orden Agenda}, ID*1000)` — leer para ordenar; escribir en Orden Agenda |
 
 ---
 
@@ -907,6 +912,42 @@ Primero necesito obtener los IDs de los campos de la tabla para luego consultar 
 | Personal | `selVZI9yL2Sy5dz1Y` |
 | Welldone | `selxLFbHOO0UaGOKe` |
 | Proyectos | `seluCOrdqy3jGbIH5` |
+
+## Usuario Config (`tblWNtdxwTjdLkcDr`):
+| Campo | ID | Tipo |
+|---|---|---|
+| Usuario | `fldmT9WPwGkNrHkDa` | singleLineText (primary) |
+| Config Columnas | `fldpgkfL0McnA2GNY` | multilineText (JSON) |
+| Config Categorías | `fldOphCRxs6EV7OA1` | multilineText (JSON) |
+| Bienvenida Columnas | `fldu2YaIZM1uToxAZ` | Casilla de Verificacion |
+| Bienvenida Categorias | `fldGK4caurx7x0F0D` | Casilla de Verificacion |
+
+---
+
+## Campos de la tabla: Conexiones (`tblAtAaz4u3SAPy8P`)
+
+Cada registro representa una agenda compartida entre dos o más usuarios. Las tarjetas y columnas creadas dentro de una conexión solo aparecen filtradas por ese registro. Los miembros de la conexión pueden crear, editar y mover tarjetas colaborativamente — funciona como una "playlist compartida" de la agenda.
+
+| Nombre | ID | Tipo |
+|---|---|---|
+| Nombre | `fld2fmJ4DpL4Gz2XT` | singleLineText (primary) |
+| Agenda | `fld94XG3updtZbgOX` | multipleRecordLinks → Agenda |
+| Color | `fldaGGwJlo2hVvG75` | singleLineText (hex) |
+| Portada | `fldXNT07bmTAAq4V1` | multipleAttachments |
+| Config Columnas | `fldSNbdtWvMLhnSjz` | multilineText (JSON) |
+| Creador | `fldNnAyEZ7HJINFU5` | email |
+| Estado | `fldc53npnBQhRkF3o` | singleSelect |
+| Miembros | `fldZAxoVKpGyM8FiR` | multilineText (JSON: `[{email, nombre, color}]`) |
+
+---
+
+### Campo: Estado (`fldc53npnBQhRkF3o`)
+
+| Opción | ID |
+|---|---|
+| Activa | `selm36GM9Yo1647B3` |
+| Archivado | `selDVXUWBX4EmdNJU` |
+
 
 # Base Toma de Requerimientos (`appk8ZBGkmqabmzyN`)
 
@@ -1178,6 +1219,150 @@ Tabla central de esta base. Cada registro representa una visita técnica con has
 | Stand by | `sel4yAKCC8AmiaXTt` |
 
 ---
+
+# Base Planeador Cotizaciones (`appSXTDQV4ZjFiGY0`)
+
+## 1. Gasto Proyecto (`tblNQZS2vVpE7vpb7`)
+
+| Nombre | ID | Tipo |
+|---|---|---|
+| ID | `fldSfN43utgBE7e3D` | number |
+| Proyecto | `fldWyhUpzAf1Jy3EF` | multipleRecordLinks |
+| Ítem | `fldtJD11rYlfSWVuy` | multipleRecordLinks |
+| Tipo Gasto | `fldUDTO9nYW16csAW` | singleSelect |
+| Trabajador | `fldMFHGM8Abt4ayip` | singleSelect |
+| Días | `fldw9nDetDsKJ5ui8` | number |
+| Valor | `fldVNoITNvaEIRw5O` | currency |
+
+---
+
+## 2. Planner Cotización (`tblNHSR18fo9qFp5Z`)
+
+| Nombre | ID | Tipo |
+|---|---|---|
+| ID Cotizacion | `fldXTl9imel5jpDm4` | formula |
+| Estado Planner | `fldTOyp027r3Kv5tH` | singleSelect |
+| Cotización | `flddzStXjUvcLYxpg` | multipleRecordLinks |
+| Portada | `fldGI7a3iu0HNsAGV` | multipleLookupValues |
+| Cliente | `fldj6bNw1AKzUeJnz` | multipleLookupValues |
+| Sede del Cliente | `fldqvxCX3JgIJhM7O` | multipleLookupValues |
+| ID Proyecto | `fldmtYIG9zkUeMzxL` | multipleLookupValues |
+| Nombre Proyecto | `fldYYn80BZn6QvBcO` | multipleLookupValues |
+| Fecha Cotización | `fldFINJwPfMhMIGWh` | multipleLookupValues |
+| Tipo de Facturación | `fldLotHPQxFiLl0I2` | multipleLookupValues |
+| Responsable | `fldKpqXFcvTus37Qb` | singleLineText |
+| Código de propuesta | `fldNx4BEGlQQyYg53` | multipleLookupValues |
+| Estado Cotización | `fldbbc7K9rgMJXQk9` | multipleLookupValues |
+| Ítems Vinulados | `fldMcKTYvprXageds` | multipleRecordLinks |
+| Subtotal | `fldkTt7qf3RJ4cXR2` | rollup |
+| % Administración | `fld3aJQObdIzr1VLa` | percent |
+| Administración Total | `fld79b3n95ICB7stk` | formula |
+| % Imprevistos | `fldi81oLurnBAJtId` | percent |
+| Imprevistos Total | `flda317Uu3BsD1Ifn` | formula |
+| % Utilidades | `fldUxmFnkLxLtuwpC` | percent |
+| Utilidades Total | `fldnIV5Cqhtiu4RU9` | formula |
+| IVA Utilidades | `fldLBvTIksYfhLgZG` | formula |
+| Total AIU | `fldMWjJtaOKblMLPR` | formula |
+| IVA 19% | `fld9hz3b6QLtUgzZf` | formula |
+| Total IVA | `fldH0LaAK5kxs0W9e` | formula |
+| Ítems/Sub-ítems | `fldwnHArXB3pW3gcE` | multipleRecordLinks |
+| Valor a facturar + IVA | `fldNvu4sTvrng8HZj` | formula |
+| IVA Resumen | `fldcZiyzjvx8fKQDa` | formula |
+| Valor Neto | `fldDp1F6V3XfdDxQs` | formula |
+| % Comisiones | `fldRps29YKmSPlFsI` | percent |
+| Comisiones Total | `fldpRPR1tgrW5uw4i` | formula |
+| % Imprevistos General | `fldRApxC4sorOTMb0` | percent |
+| Imprevistos General Total | `fldtYCe6syTn4gXOT` | formula |
+| Total Costos Directos | `fld43cH5RM8QRdKsd` | rollup |
+| % Retenciones | `fldYBnAbss0XvIbKk` | percent |
+| Retenciones Total | `fldSHyvIpWpo5QL8Y` | formula |
+| Utilidad Esperada | `fldm4Kmm7kp8ldHQR` | formula |
+| %. Utilidad esperada | `flduQIV6srFSUil36` | formula |
+| SUM Mano de Obra | `fldFtf1zIZN5GxNgg` | rollup |
+| SUM Servicio | `fldjrL89a0qGMNSlY` | rollup |
+| SUM Logística | `fld8Q7FuHaxFcpGW1` | rollup |
+| SUM Administrativos | `fld0IXl8EgSZMVN4e` | rollup |
+| SUM Materiales | `fldpGPRiZtG75sm6I` | rollup |
+| SUM Imprevistos | `fldFqRyKZD3f5PyS5` | rollup |
+| Total Categorias | `fldcrnd5mnDBzHh4d` | formula |
+| SUM Mano de Obra Real | `fldEhuIXkaOUsHIYM` | multipleLookupValues |
+| SUM Servicio Real | `fldZ1y5oZCFJQnHwx` | multipleLookupValues |
+| SUM Logística Real | `fld5SA3OQG03j3ZoE` | multipleLookupValues |
+| SUM Administrativos Real | `fldZJnN4T1bKxAbtm` | multipleLookupValues |
+| SUM Materiales Real | `fldREPIyF4Bj151Y6` | multipleLookupValues |
+| SUM Imprevistos Real | `fldMR112sbNR1Lys3` | multipleLookupValues |
+| Diferencia Mo | `fldAa9CmA5wgePJhd` | formula |
+| Diferencia Serv | `fldC1Y2FZv9MH6B6l` | formula |
+| Diferencia Log | `fldKud0Icy4Rp0S4R` | formula |
+| Diferencia Adm | `fldxnxjtrRhYDsC9H` | formula |
+| Diferencia Mat | `fld9kE0WyHvJfRjzT` | formula |
+| Diferencia Imp | `fldrxRiGlNCkmLfKT` | formula |
+| % Diferencia Mo | `fldFrWo5Imkt8qJpg` | formula |
+| % Diferencia Serv | `fldAz6BlRusTanDqu` | formula |
+| % Diferencia Log | `fldkVh7tVOl2Hf9C5` | formula |
+| % Diferencia Adm | `fldZ4HeMyVkOsedJt` | formula |
+| % Diferencia Mat | `fldxQKErn4FAM4vNM` | formula |
+| % Diferencia Imp | `fldiNzhwp1J98916k` | formula |
+| Total Valor Real | `fldB4c4EjRfvEYvEZ` | formula |
+| Duplicar Planner | `flds7lbXh8h7zHbvT` | checkbox |
+| Record ID | `fldsZvCRTqO7i28xn` | formula |
+| Cantidad de los Ítems | `fldYvlrmENQNtZna2` | multipleLookupValues |
+| Descripción de Ítems | `fldP20UTI9WckUe1V` | multipleLookupValues |
+| Cantidad de items | `fldX5h2Po15wUjwTF` | count |
+| Record ID (from Cotización) | `fld2tnGjqHGuKviTK` | multipleLookupValues |
+| Vinculación Cotización Real | `fldwxh9AS8q2uvkPd` | multilineText |
+| Origen | `fldcveQQg9ptKf3SD` | singleSelect |
+| ID Numero | `fld4nLi56FHPnOZkT` | autoNumber |
+| Estado Planner Input | `fldsLi4EiIjosxWGZ` | singleLineText |
+| HEFS_Analisis_Financiero | `fld3UY7MCkCOSZHMF` | multipleRecordLinks |
+| HEFS_Flujo_Caja_Propuesta | `fldb8rIf0EeetKmin` | multipleRecordLinks |
+| HEFS_Templates_Planner | `fldVmoXFRLShJuKSv` | multipleRecordLinks |
+
+---
+
+## 3. Ítems/Sub-ítems (`tblL59aYc0z0x6DLn`)
+
+| Nombre | ID | Tipo |
+|---|---|---|
+| ID Ítem | `fldoQz1lgaovAsKTB` | formula |
+| Estado | `fldF8bXkjzOkmhM84` | singleSelect |
+| Categoria | `fld9ueuCjJtq9ZpCg` | singleSelect |
+| Tipo | `fldcyDpWhZSIhwN1S` | singleSelect |
+| Tipo Sub-Ítem | `fld3QnpIbsECT0lZm` | singleSelect |
+| Descripción | `fldleMVvnsak6Q01h` | multilineText |
+| UM | `fldtSppqVaGddRbnU` | singleSelect |
+| Cantidad | `fldSvPTWyzI1j5TS2` | number |
+| Valor Unidad | `fldkneaR6qjW9gv4t` | currency |
+| Valor Total | `fldp7QLsUKCiLitzb` | formula |
+| Sub-ítem Vinculados | `fldrsXdTNo9rzSIAZ` | multipleRecordLinks |
+| Total Costos Directos | `fldIocCWf71GLWVd2` | rollup |
+| Ítem Vinculado | `fldjHvT2Jy2786ZMa` | multipleRecordLinks |
+| Estado de Ítem | `fldy4sZb2F6EcECkg` | multipleLookupValues |
+| Costos Unit | `fldWbmt4LRoAL2QZK` | formula |
+| Utilidad | `fldx7f9S3nPynnLhu` | formula |
+| % Utilidad | `fldsab1myETd7LSqR` | formula |
+| Cotización x Ítem | `fldLJC8sUvltZmrts` | multipleRecordLinks |
+| Cotización x Sub-Ítem | `fldsczKM7EXIbqbYV` | multipleRecordLinks |
+| Cotización Formula | `fldlLk55MrW6Qmk2F` | formula |
+| Agregar Template | `fld5KJ5YeDbJIV3Ro` | checkbox |
+| Registros Financieros | `fldMn8SutMwrdBchl` | multipleRecordLinks |
+| CR Totales | `fldJd9i5xZkp2u9jm` | rollup |
+| CR Unit | `fldOA3NHjoP6CiamS` | formula |
+| Utilidad Real | `fldW8OCNLDHqU4Z2V` | formula |
+| Crear Template | `fldxDXFGHEPPKCggj` | checkbox |
+| ID Numero Automatico | `fldlq4sAwy76Ux9Mw` | autoNumber |
+| Record ID | `fldjhqyIxfck1t3Kr` | formula |
+| Orden | `fldtHrHLamczHGYuA` | number |
+| Descripción Ítem Vinculado | `fld4qQr2tXYQS0Nh7` | multipleLookupValues |
+| ID Numero | `fldIBCiAAfo7nGpma` | formula |
+| Estado Planner Cotización | `fldgDcyl0xzeugiPR` | multipleLookupValues |
+| Es Duplicado? | `fldTznlMCB8qdZhOi` | checkbox |
+| Ítems Origen Duplicado | `fldp1ncDwCPboF7I6` | singleLineText |
+| HEFS_Cronograma_Actividades | `fldfxMGrODEHc1oBs` | multipleRecordLinks |
+| HEFS_Templates_Items | `fld2bn3Rr1mLNRHv1` | multipleRecordLinks |
+| HEFS_Templates_Subitems | `fldCf7aiP2oVFGsmv` | multipleRecordLinks |
+| Gasto Proyecto | `fldPdtPfCfddQMc8U` | multipleRecordLinks |
+
 
 ## Trampas conocidas (regresar aquí ante errores)
 
