@@ -652,6 +652,26 @@ Esta base es independiente de la base principal (Portal Empresarial Welldone). C
 
 ---
 
+## Datasource IDs para multi-source (`datasource.define`)
+
+⚠️ Estos son los **UUID de datasource de Softr** que se pasan a `datasource.define({ alias: "uuid" })` cuando un bloque tiene **varias tablas conectadas**. Son **distintos** de los `tblXXX` de Airtable de la tabla de arriba — NO confundirlos. Ver la sección **"⭐ Multiple datasources in one block"** en `SKILL.md` (patrón preferido frente a `window`).
+
+Cómo obtener uno nuevo: con las tablas ya conectadas al bloque, preguntar a la IA de Softr → *"Lista los `extendedState.dataSources` de este bloque: el `id` y `name` de cada uno."*
+
+> ⚠️ **La IA de Softr ha dado UUIDs inconsistentes entre consultas.** Estos UUID son globales (mismos en toda la app), pero la IA a veces los inventa mal y eso causa `count: 0` silencioso. Estado = qué tan verificado está cada uno por uso real.
+
+| Tabla | Datasource UUID (para `from: ds.alias`) | Estado |
+|---|---|---|
+| Agenda | `ba313bb9-c10b-4656-8f7c-586c8d5f17bf` | ✅ confirmado (consistente en todas las consultas + funciona) |
+| Usuarios Mercure | `cd22c51a-10aa-45e3-a5c3-447f524e40dd` | ✅ funciona (catálogo de categorías sale en detalle-agenda-PWA). La IA también dio `96f83b6a-…` en otra consulta — **usar `cd22c51a`** |
+| Tableros Custom | `514ed71e-68e3-45b7-8167-9827654ad5b1` | ⚠️ candidato (el `24d50715-…` de la 1ª consulta daba `count: 0`; este es el de la 2ª) — verificar probando |
+| Conexiones | `f31864cd-dc91-40a8-be82-f6dd54b78ec8` | ⚠️ sin verificar — probar |
+| Gestión Tareas | _(pendiente)_ | — |
+
+> A medida que se necesiten más tablas en multi-source, añadir aquí su UUID (no el `tblXXX`). **Siempre confirmar probando** — si un `from: ds.x` da `count: 0`, el UUID está mal.
+
+---
+
 ## Solicitudes (`tblLE1ydloydn7rlT`)
 
 Tabla de solicitudes enviadas por clientes o internamente. Vinculada a tareas de ejecución.
@@ -913,14 +933,18 @@ Tabla principal de tareas internas de la empresa (comercial, tecnología, proyec
 | Welldone | `selxLFbHOO0UaGOKe` |
 | Proyectos | `seluCOrdqy3jGbIH5` |
 
-## Usuario Config (`tblWNtdxwTjdLkcDr`):
+## Usuario Config (`tblWNtdxwTjdLkcDr`) — OBSOLETA (borrada). Reemplazada por "Usuarios Mercure".
+
+## Usuarios Mercure (tabla de config de usuario para Mercure)
 | Campo | ID | Tipo |
 |---|---|---|
-| Usuario | `fldmT9WPwGkNrHkDa` | singleLineText (primary) |
-| Config Columnas | `fldpgkfL0McnA2GNY` | multilineText (JSON) |
-| Config Categorías | `fldOphCRxs6EV7OA1` | multilineText (JSON) |
-| Bienvenida Columnas | `fldu2YaIZM1uToxAZ` | Casilla de Verificacion |
-| Bienvenida Categorias | `fldGK4caurx7x0F0D` | Casilla de Verificacion |
+| Nombre | `fldgBUK0mVcH0HH4P` | singleLineText (primary) |
+| Cargo | `fldariSSEuxMIKeOL` | singleSelect |
+| Categorias | `fldlt2gptmuA6skpg` | multilineText (JSON: catálogo personal `[{label, color}]`) |
+| Correo Softr | `fldskaMcxb4SF1q1B` | email (clave para filtrar por usuario logueado) |
+| Estado | `fldENyx8uoaoNJHa5` | singleSelect |
+| Foto Perfil | `fldmC2hgHIRVLwIZS` | multipleAttachments |
+| Área | `fld6kmG5hkjCd35vW` | singleSelect |
 
 ---
 
@@ -938,6 +962,7 @@ Cada registro representa una agenda compartida entre dos o más usuarios. Las ta
 | Creador | `fldNnAyEZ7HJINFU5` | email |
 | Estado | `fldc53npnBQhRkF3o` | singleSelect |
 | Miembros | `fldZAxoVKpGyM8FiR` | multilineText (JSON: `[{email, nombre, color}]`) |
+| Categorias | `fldNDoJfWUG4Ve7Xz` | multilineText (JSON: catálogo de categorías de la conexión `[{label, color}]`) |
 
 ---
 

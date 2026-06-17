@@ -790,9 +790,83 @@ const [templateLoading, setTemplateLoading] = useState(null); // recordId in pro
 if (savingOrder) return; // block if another op in progress
 ```
 
-## Cross-block communication via `window.__variable`
+## ⭐ Multiple datasources in one block — PREFERRED (replaces most `window` plumbing)
 
-Softr does not allow two blocks on the same page to share a Source or pass props. The only clean way is to expose values on `window` under a `__` prefix.
+**This is now the default way to combine data from more than one table in a single block.** Softr Vibe Coding Blocks support **multiple datasources per block**. This largely **replaces the old pattern of invisible "provider" blocks that publish to `window.__variable`**. Whenever a block needs to read/write more than one table, reach for multi-datasource FIRST. Keep `window` only for the genuinely cross-page / cross-iframe cases (see the legacy section below).
+
+### Why this matters
+- **No more invisible provider blocks** + `window` events just to bring a second table into a block.
+- The data lives in the same component: no cross-block timing, no "consumer mounted before producer", no event listeners, no `window.__x` cleanup.
+- **Detail pages / modals (isolated)** can read their own auxiliary tables directly instead of depending on a provider that may not be mounted there — this fixes a whole class of "it works on the home page but not in the detail" bugs.
+
+### How it works
+
+1. **Connect the extra datasources** to the block in Softr Studio (the block's **Source** tab — add each table).
+2. **Define aliases** with `datasource.define({...})` at **module level** (outside the component) — and put it **near the top of the file**, right after the imports, before any select/helper/component definitions. Everything else in the file (selects, helper functions, components, the block itself) depends on `ds`, so it must exist first and be the first thing a reader sees. Maps a readable alias → each datasource **id** (a Softr UUID, **NOT** the Airtable `tblXXX`).
+3. **One `q.select()` per table.**
+4. **Every data hook takes `from: ds.alias`** — mandatory in multi-datasource mode. This isn't limited to the obvious `useRecord`/`useRecords` calls in the main component: if you write a **helper function or sub-component that itself calls a data hook** (e.g. a modal that does its own `useRecordUpdate`, a row component with its own `useRecordDelete`), that hook ALSO needs `from: ds.alias` for whichever table it touches. When reviewing or writing code, for every data hook ask "which table is this for?" and make sure `from` says so explicitly — never leave it implicit or rely on the block's "primary" datasource.
+
+```js
+import { datasource, useRecord, useRecords, useRecordUpdate, q } from "@/lib/datasource";
+
+// 1) Aliases → datasource UUIDs (from extendedState.dataSources, NOT tblXXX)
+const ds = datasource.define({
+  agenda:   "ba313bb9-c10b-4656-8f7c-586c8d5f17bf",
+  usuarios: "cd22c51a-10aa-45e3-a5c3-447f524e40dd",
+});
+
+// 2) One select PER table
+const agendaSelect   = q.select({ nombre: "Nombre", categoria: "Categoría" });
+const usuariosSelect = q.select({ categorias: "Categorias", correo: "Correo Softr" });
+
+export default function Block() {
+  // 3) from: ds.alias in EVERY data hook
+  const { data: agendaData } = useRecord({ from: ds.agenda, recordId, select: agendaSelect });
+  const updateAgenda         = useRecordUpdate({ from: ds.agenda, fields: agendaSelect });
+
+  const usuariosQuery  = useRecords({ from: ds.usuarios, select: usuariosSelect, count: 50 });
+  const updateUsuario  = useRecordUpdate({ from: ds.usuarios, fields: usuariosSelect });
+  // ...
+}
+```
+
+### ⚠️ The one rule you cannot break
+**In multi-datasource mode, EVERY data hook needs `from` — wherever it's called.** Omit it and the hook silently returns nothing (or errors): the block renders, but that table comes back **empty**. Classic symptom — `status: "success"` with `count: 0` and an empty list, while another table in the *same* block works fine. This applies just as much to a hook tucked inside a small helper/modal/row component as to one in the main `Block()` — there's no "default" datasource once `ds` is defined, so every hook call must name its table.
+
+- Hooks that **need `from`**: `useRecord`, `useRecords`, `useRecordUpdate`, `useRecordCreate`, `useRecordDelete`, `useLinkedRecords`, `useFieldOptions`.
+- Global hooks that **do NOT take `from`**: `useUpload`, `useCurrentRecordId`, `useCurrentUser`.
+
+### Single vs multi — when each mode is active
+| | Single datasource | Multi datasource |
+|---|---|---|
+| Detection | `extendedState.dataSources.length === 1` | `> 1` |
+| `datasource.define` | not needed | **required** |
+| `from` in hooks | **omit** | **required in ALL data hooks** |
+| selects | one | one per table |
+
+With a **single** datasource, do NOT pass `from` — Softr resolves it automatically (existing single-source blocks stay exactly as they are). Adding a second source to a block **forces** you to add `from` to the hooks that were already there.
+
+### Getting the datasource IDs
+The id used in `datasource.define` is the Softr datasource **UUID** (e.g. `ba313bb9-…`), found in `extendedState.dataSources` — **not** the Airtable `tblXXX`. These UUIDs are **global and consistent across the whole app**: the same table has the same UUID in every block. (What changes per block is the block's *primary* datasource — `entity.dataSourceId` — and the internal **field** IDs, not the datasource UUID.)
+
+With the sources already connected to the block, ask the Softr AI:
+> *"List the `extendedState.dataSources` of this block: the `id` and `name` of each."*
+
+⚠️ **Verify, don't blindly trust the answer.** The Softr AI has been observed returning **inconsistent / wrong UUIDs** across queries (e.g. it gave `24d50715-…` for a table that is actually `514ed71e-…`). A wrong UUID **silently yields `count: 0`** — the hook resolves to nothing while other tables in the same block work. So: if one `from: ds.x` hook returns `count: 0`, the UUID is almost certainly wrong → re-fetch and confirm. Confirm by running, not by the first answer. Known-good UUIDs are recorded in the schema reference file.
+
+### Filtering
+Source filters (Softr Studio) and **Global data restrictions** still apply per table. For "only the current user's rows", configure it as a source filter / global restriction, **and/or** filter in code by the logged-in email (`useCurrentUser`). When you only need to *resolve records by id* (e.g. look up linked tableros a card references), don't over-filter in code — a too-strict email match can hide valid rows; index everything the source returns and `find` by id.
+
+### Gotcha: a table comes back `count: 0`
+If one `from: ds.x` hook returns `status: success, count: 0` while the others work, then almost always the datasource is **not actually connected** to the block, or the **UUID in `datasource.define` is wrong**. Re-check the block's Source tab and re-confirm the id via `extendedState.dataSources` (don't assume the id you were given earlier is still the one wired up).
+
+---
+
+## Cross-block communication via `window.__variable` (LEGACY — prefer multi-datasource above)
+
+> **Prefer the multi-datasource pattern above.** Use `window` only when a block genuinely **cannot** include the other table as a source — i.e. truly cross-page / cross-iframe sharing (a value produced on one page that a *separate* Softr modal page needs, where adding the table as a source isn't an option). For bringing a second table into a single block, multi-datasource is cleaner and is now the default.
+
+Historically, Softr did not allow two blocks on the same page to share a Source or pass props, and the only clean way was to expose values on `window` under a `__` prefix.
 
 ### Basic pattern — share data and refetch
 
