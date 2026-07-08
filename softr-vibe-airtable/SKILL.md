@@ -1183,6 +1183,63 @@ const pasosTimeline = useMemo(() => [
 ], [etapaIndex, f.fechaCulminada]);
 ```
 
+### 10. Non-editable fields in `writeFields` silently disable ALL mutations
+
+Including a read-only field (`aiText`, `formula`, `rollup`, `lookup`, `autoNumber`) in the `writeFields` `q.select()` causes Softr to disable the entire `useRecordUpdate` hook with AssertionError:
+
+> `Cannot perform record update because it's disabled`
+
+**Symptom:** Every inline edit does nothing — no network request, no error in the UI, just silence. May seem like a dropdown or event issue, but in reality the hook itself is disabled at initialization.
+
+**Fix:** Remove every non-writable field from `writeFields`. Only plain text, numbers, dates, checkboxes, `singleSelect`, `multipleSelects`, `multipleRecordLinks`, and `multipleAttachments` (own, not lookup) belong there.
+
+```js
+// ✅ CORRECT — separate selects
+const select = q.select({
+  nombre: "Nombre",
+  ayudasIA: "Ayudas al técnico",  // aiText — OK to READ
+  estado: "Estado",
+});
+
+const writeFields = q.select({
+  nombre: "Nombre",
+  // ❌ DO NOT include: ayudasIA — aiText causes hook to be disabled
+  estado: "Estado",
+});
+```
+
+The existing `select` comment in all blocks already documents this, but it's easy to overlook when adding new fields: always ask "is this field writable in Airtable?" before adding it to `writeFields`.
+
+### 11. `useFieldOptions` without `from` crashes the block in multi-source mode
+
+In single-source blocks, `useFieldOptions` works with no `from`. When you add a second datasource, all data hooks — **including `useFieldOptions` inside helper components** like `SelectDropdown` — immediately require `from: ds.alias`.
+
+**Symptom:** Unlike other hooks that fail silently, `useFieldOptions` without `from` throws a hard error:
+
+> `Error: Cannot call useFieldOptions because this block does not have a datasource configured`
+
+The whole block fails to load ("Timed out waiting for block to load"). The error stack points to the Softr renderer, not to your code, making it hard to trace.
+
+**Fix:** When converting a single-source block to multi-source, search for every `useFieldOptions` call — including those inside helper components defined outside `Block()` — and add `from: ds.yourSource`.
+
+```js
+// ❌ Breaks the block when a second source is added
+const { options } = useFieldOptions({ select, field: fieldName });
+
+// ✅ Required in multi-source mode
+const { options } = useFieldOptions({ from: ds.requerimientos, select, field: fieldName });
+```
+
+**Checklist when adding a second datasource to an existing block:**
+
+| Hook | Action |
+|---|---|
+| `useRecord` / `useRecords` | Add `from` |
+| `useRecordUpdate` / `useRecordCreate` / `useRecordDelete` | Add `from` |
+| `useLinkedRecords` | Add `from` |
+| `useFieldOptions` — in `Block()` AND in every helper component | Add `from` |
+| `useUpload`, `useCurrentRecordId`, `useCurrentUser` | No `from` needed |
+
 ## Source of the Softr block — critical considerations
 
 - Softr **does NOT support `sourceIndex`** — a block can have only one Source active.
@@ -1206,6 +1263,7 @@ When an Airtable mutation appears silent (UI doesn't update, no visible error), 
 | 6 | `useRecordCreate` fails with linked + attachments | Everything in single payload | Create without attachments → get `recordId` → second `update` with attachments |
 | 7 | `update` does nothing, no error log | Field missing from `writeFields` (`q.select`) | Verify the field's alias is in the write select |
 | 8 | Mutation is slow and ultimately fails | Circular data in payload | Check you're not sending the whole record object — only fields to modify |
+| 9 | **ALL** edits do nothing, no request fired, hook seems inactive | Non-writable field (`aiText`, `formula`, `rollup`, `lookup`) included in `writeFields` | Remove every read-only field from `writeFields`. Softr disables the entire hook with AssertionError — see pitfall #10 |
 
 ### Logging template for mutation diagnosis
 
