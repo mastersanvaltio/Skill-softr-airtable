@@ -174,6 +174,8 @@ En esos casos, como fallback mostrar un selector manual o dejar el campo vacío.
 
 ## Available libraries
 
+Default stack — prefer these, they are always present:
+
 ```js
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -183,19 +185,40 @@ import { Textarea } from "@/components/ui/textarea";
 import { /* needed icons */ } from "lucide-react";
 ```
 
-Tailwind: only **core utility classes**. No custom Tailwind compiler available — avoid arbitrary values like `bg-[#10172A]`. Use `style={{ backgroundColor: "#10172A" }}` for hex colors.
+- **Components:** shadcn/ui (30+ available)
+- **Icons:** Lucide (preferred)
+- **Styling:** Tailwind — only **core utility classes**. No custom Tailwind compiler
+  available, so avoid arbitrary values like `bg-[#10172A]`; use
+  `style={{ backgroundColor: "#10172A" }}` for hex colors.
+- **Runtime:** browser only. No Node.js, no server-side code, no file system.
+
+### npm packages
+
+Per the official docs, **any public npm package auto-installs on import** — the
+stack above is the preferred default, not a hard whitelist. So things like a PDF
+generator or a date library are technically viable.
+
+> ⚠️ Treat this as *possible but unverified* in a given project: it has not been
+> exercised in this user's setup. Before promising a feature that depends on an
+> external package, add the import in a throwaway block and confirm it resolves.
+> Always prefer a solution built on the default stack when one exists — every
+> extra package is weight downloaded on a phone with bad signal in the field.
 
 ## Hook selection
 
 | Goal | Hook | Notes |
 |---|---|---|
-| List of records (with pagination) | `useRecords({ select, count: 100 })` | Always implement auto-pagination |
-| Detail of a single record (detail page) | `useRecord({ recordId, select })` | Combine with `useCurrentRecordId()` |
-| Options of a `multipleRecordLinks` field for a dropdown | `useLinkedRecords({ select, field, search, enabled })` | `field` is the **alias** declared in `q.select()`, not the real field name |
+| List of records (with pagination) | `useRecords({ select, count, where, orderBy, enabled })` | `count` default 6, **max 100**. See "Server-side filtering, sorting and aggregation" |
+| Detail of a single record (detail page) | `useRecord({ recordId, select, enabled })` | Combine with `useCurrentRecordId()` |
+| Options of a `multipleRecordLinks` field for a dropdown | `useLinkedRecords({ select, field, search, sortOrder, count, enabled })` | `field` is the **alias** declared in `q.select()`, not the real field name. `count` max **1000** here |
 | Options of a `singleSelect` / `multipleSelects` field | `useFieldOptions({ select, field })` | Returns `{ options, isLoading }` where `options` is `[{ id, label, color }]`. Auto-syncs with Airtable schema |
-| Update one record | `useRecordUpdate({ fields, onSuccess })` | `fields` is a separate write-only `q.select()` |
-| Create a record | `useRecordCreate({ fields, onSuccess })` | Different payload format from update |
+| **One aggregated number** (count/sum/avg…) | `useMetric({ select, metric, where })` | Computed server-side. Use instead of loading every record just to count them |
+| **Grouped data for a chart** | `useChartData({ select, metric, groupBy, orderBy, where })` | Supports date buckets (year / month / day) |
+| Update one record | `useRecordUpdate({ fields, onSuccess })` | `fields` is a separate write-only `q.select()`. Exposes `enabled` — check it |
+| Create a record | `useRecordCreate({ fields, onSuccess })` | Different payload format from update. Exposes `enabled` — check it |
+| Delete a record | `useRecordDelete({ onSuccess })` | `mutate(recordId)` — plain string, not an object. Exposes `enabled` |
 | Upload files (returns public URLs) | `useUpload()` | Returns `{ uploadAsync, isUploading }` |
+| Call a REST API datasource | `useProxyFetch(ds.alias)` | Auth attached automatically. Text payloads only — no streams/FormData/file uploads |
 | Current record ID on a detail page | `useCurrentRecordId()` | Only works on Softr "detail" pages |
 
 ### `useRecord` vs `useRecords`
@@ -508,7 +531,7 @@ const { data, status, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } 
   useRecords({ select, count: 100 });
 ```
 
-### Auto-pagination (ALWAYS implement if more than 100 records possible)
+### Auto-pagination — the default for small/medium tables
 
 ```js
 useEffect(() => {
@@ -517,6 +540,125 @@ useEffect(() => {
 
 const allRecords = (data?.pages || []).flatMap(p => p.items || []);
 ```
+
+This loops until the **whole table** is in the browser. Fine up to a few hundred
+records; a disaster at scale — 10 000 records at `count: 100` means 100 sequential
+requests before the page is usable.
+
+> **Above ~500 records, do not blind-loop.** Use `where` + `orderBy` to let the
+> server do the work, and paginate on demand (a "Cargar más" button, or fetch more
+> only while a needed range hasn't been covered yet). See the next section.
+
+## Server-side filtering, sorting and aggregation
+
+`useRecords` accepts far more than `{ select, count }`:
+
+```tsx
+useRecords({
+  select,                   // q.select({...}) — required
+  count?: number,           // records per page. Default 6, MAX 100
+  where?: FilterExpression, // server-side filter
+  orderBy?: SortExpression, // server-side sort
+  enabled?: boolean,        // defer the query until true
+  from?: DatasourceAlias,   // required when the block has 2+ datasources
+})
+```
+
+### ⚠️ `where` and `orderBy` take the ALIAS, never the real field name
+
+The most important rule here, and it is **not** in the official docs — confirmed
+by direct testing.
+
+```js
+const select = q.select({ id: "ID", fecha: "Fecha documento" });
+
+orderBy: q.desc("id")     // ✅ the alias declared in q.select()
+orderBy: q.desc("ID")     // ❌ tears the whole block down
+```
+
+Passing the real Airtable field name throws and **unmounts the entire block** —
+blank screen, with this in the console:
+
+> `Could not find an alias for subject "undefined"`
+
+It does not fail silently and it does not degrade gracefully. Same rule for every
+filter builder (`q.text()`, `q.date()`, …). This mirrors `useLinkedRecords`,
+where `field` is also the alias.
+
+### Sorting
+
+```js
+orderBy: q.asc("alias")
+orderBy: q.desc("alias")
+orderBy: [q.desc("aliasA"), q.asc("aliasB")]   // tie-breakers
+```
+
+Verified on a 2 868-record table: with `q.desc("id")` and no auto-pagination, the
+first page came back as IDs 2891 → 2789. The sort really happens on the server —
+the first page is genuinely the newest records, not a random slice re-sorted
+locally. **This is what makes partial loading correct.**
+
+### Filter builders
+
+| Builder | Operators |
+|---|---|
+| `q.text(alias)` | `is`, `isNot`, `contains`, `startsWith`, `endsWith`, `isOneOf`, `isNoneOf`, `hasAllOf`, `isEmpty`, `isNotEmpty` |
+| `q.number(alias)` | `is`, `isNot`, `gt`, `gte`, `lt`, `lte`, `between`, `isEmpty`, `isNotEmpty` |
+| `q.boolean(alias)` | `is`, `isNot`, `isEmpty`, `isNotEmpty` |
+| `q.date(alias)` | `is`, `isNot`, `gt`, `gte`, `lt`, `lte`, `between`, `isNotBetween`, `isEmpty`, `isNotEmpty` |
+| `q.array(alias)` | `is`, `isOneOf`, `isNoneOf`, `hasAllOf`, `isEmpty`, `isNotEmpty` |
+
+Combine with `q.and(...)` / `q.or(...)` — **max 2 levels of nesting**.
+
+```js
+const [desde, setDesde] = useState("2026-01-01");
+
+const { data } = useRecords({
+  select,
+  count: 100,
+  orderBy: q.desc("id"),
+  where: q.and(
+    q.date("fecha").gte(desde),
+    q.text("estado").is("Firmado"),
+  ),
+});
+```
+
+`where` is **dynamic**: build it from React state and the query refetches when it
+changes. This is the right way to implement a date-range or status filter over a
+big table — never load everything and `.filter()` in JS.
+
+### `total` — a server-side count without loading the rows
+
+```js
+const total = data?.pages?.[0]?.total;   // reflects `where`
+```
+
+Verified: on the same 2 868-record table, adding `q.date(...).gte("2026-01-01")`
+dropped `total` to 1 124 while still only 100 records were in the browser.
+
+### Aggregations without pulling records
+
+```js
+const { data: firmados } = useMetric({
+  select,
+  metric: metric.count(),
+  where: q.text("estado").is("Firmado"),
+});
+```
+
+Available: `metric.count()`, `metric.sum(alias)`, `metric.avg(alias)`,
+`metric.max(alias)`, `metric.min(alias)`, `metric.distinct(alias)`.
+
+For charts, `useChartData` adds grouping:
+
+```js
+groupBy: metric.groupBy("alias", metric.bucket.month.long)
+// buckets: year | month.iso | month.long | day.iso | day.long
+```
+
+Use these for dashboard counters. Loading every record client-side just to call
+`.length` is the anti-pattern they replace.
 
 ## Mutations: critical patterns
 
@@ -847,12 +989,23 @@ export default function Block() {
 With a **single** datasource, do NOT pass `from` — Softr resolves it automatically (existing single-source blocks stay exactly as they are). Adding a second source to a block **forces** you to add `from` to the hooks that were already there.
 
 ### Getting the datasource IDs
-The id used in `datasource.define` is the Softr datasource **UUID** (e.g. `ba313bb9-…`), found in `extendedState.dataSources` — **not** the Airtable `tblXXX`. These UUIDs are **global and consistent across the whole app**: the same table has the same UUID in every block. (What changes per block is the block's *primary* datasource — `entity.dataSourceId` — and the internal **field** IDs, not the datasource UUID.)
 
-With the sources already connected to the block, ask the Softr AI:
+> 🚫 **DO NOT hardcode real datasource UUIDs when generating a block.** In this user's Softr setup the UUIDs are **NOT stable** — they change per block and the same table gets a different UUID in each block (the Softr AI even reuses one UUID string, like `6647b766-…`, for the *primary* datasource of unrelated blocks). Any UUID you copy from another block or an earlier session is almost certainly wrong and will silently yield `count: 0`.
+>
+> **Always emit clear PLACEHOLDERS** and let the user fill them in Softr. Use obvious names, one per alias:
+> ```js
+> const ds = datasource.define({
+>   principal:  "PONER_UUID_TABLA_PRINCIPAL",  // ← el usuario lo reemplaza en Softr
+>   bitacora:   "PONER_UUID_BITACORA",
+>   mensajeria: "PONER_UUID_MENSAJERIA",
+> });
+> ```
+> Add a one-line comment telling the user to replace them. Never invent a real-looking UUID.
+
+The id used in `datasource.define` is the Softr datasource **UUID** (e.g. `ba313bb9-…`), found in `extendedState.dataSources` — **not** the Airtable `tblXXX`. To get them, with the sources already connected to the block, the user asks the Softr AI:
 > *"List the `extendedState.dataSources` of this block: the `id` and `name` of each."*
 
-⚠️ **Verify, don't blindly trust the answer.** The Softr AI has been observed returning **inconsistent / wrong UUIDs** across queries (e.g. it gave `24d50715-…` for a table that is actually `514ed71e-…`). A wrong UUID **silently yields `count: 0`** — the hook resolves to nothing while other tables in the same block work. So: if one `from: ds.x` hook returns `count: 0`, the UUID is almost certainly wrong → re-fetch and confirm. Confirm by running, not by the first answer. Known-good UUIDs are recorded in the schema reference file.
+⚠️ **A wrong UUID silently yields `count: 0`** — the hook resolves to nothing while other tables in the same block work. So if one `from: ds.x` hook returns `count: 0`, the UUID is almost certainly the placeholder still unfilled or a wrong value → the user re-fetches it from that specific block. The old "known-good UUIDs" table in the schema reference is unreliable for this reason; treat any listed UUID as a hint, not a fact.
 
 ### Filtering
 Source filters (Softr Studio) and **Global data restrictions** still apply per table. For "only the current user's rows", configure it as a source filter / global restriction, **and/or** filter in code by the logged-in email (`useCurrentUser`). When you only need to *resolve records by id* (e.g. look up linked tableros a card references), don't over-filter in code — a too-strict email match can hide valid rows; index everything the source returns and `find` by id.
@@ -1210,6 +1363,33 @@ const writeFields = q.select({
 
 The existing `select` comment in all blocks already documents this, but it's easy to overlook when adding new fields: always ask "is this field writable in Airtable?" before adding it to `writeFields`.
 
+**The same AssertionError has a second, unrelated cause.** Every mutation hook
+exposes an `enabled` flag reflecting whether the *datasource itself* permits the
+operation (create/update/delete toggles in the Softr Source, permissions, a
+freshly reconnected source). Calling `mutate()` while `enabled` is false throws:
+
+> `Cannot perform record creation because it's disabled`
+
+So when you hit this error, there are two things to check:
+
+1. **In code** — is a read-only field sitting in `writeFields`?
+2. **In Softr Studio** — does that Source actually have create/update/delete
+   enabled? Reconnecting or swapping a Source can silently drop those permissions.
+
+The docs require guarding on it. Read it off the hook and check before mutating,
+and use it to disable the button so the UI never offers an action that will throw:
+
+```js
+const createRecord = useRecordCreate({ from: ds.items, fields: writeFields });
+
+const crear = () => {
+  if (!createRecord.enabled) return;   // guard first
+  createRecord.mutate({ ...campos });
+};
+
+<button disabled={!createRecord.enabled} onClick={crear}>Crear</button>
+```
+
 ### 11. `useFieldOptions` without `from` crashes the block in multi-source mode
 
 In single-source blocks, `useFieldOptions` works with no `from`. When you add a second datasource, all data hooks — **including `useFieldOptions` inside helper components** like `SelectDropdown` — immediately require `from: ds.alias`.
@@ -1307,7 +1487,10 @@ const updateRecord = useRecordUpdate({
 | Inventing IDs (`selXXX`, `recXXX`, `tblXXX`) | Ask the user or query Airtable schema first |
 | Mixing `{id}`/`{url}` in attachment arrays | All items as `{url, filename}` |
 | `mousedown` for outside-click on custom dropdowns | `click` + `setTimeout(0)` |
-| External libraries not in the available list | Only the listed stack |
+| Real field names in `where` / `orderBy` | The **alias** from `q.select()` — the field name crashes the block |
+| Loading a whole large table to filter/count in JS | `where` / `orderBy` / `useMetric` server-side |
+| Reaching for an npm package by reflex | Default stack first; verify the import resolves before promising it |
+| Calling `mutate()` without checking `enabled` | Guard on `enabled`, and disable the button with it |
 
 ## Visual style — Welldone (OPTIONAL, only on explicit mention)
 
@@ -1365,6 +1548,101 @@ Internal portal:  https://portalwelldone.softr.app
 
 Detail pages: `{baseUrl}/{slug}?recordId={recordId}`. Always use the Softr/Airtable internal record ID as `recordId`.
 
+## Abrir una página de Softr como MODAL (patrón de URL)
+
+Softr puede abrir **cualquier página del app dentro de un modal**, encima de la página actual, sin navegar a otro sitio. No hay una API JS para esto: se controla con **query params en la URL**.
+
+### Formato
+
+```
+{ruta-actual}?modalSize=L&modal={ruta-destino-URL-encoded}&modalPlacement=center
+```
+
+El parámetro `modal` lleva la ruta de destino **completa y URL-encoded**, incluyendo su propio query string:
+
+```
+/detalle-prospectos?recordId=recXXX
+        ↓ encodeURIComponent
+%2Fdetalle-prospectos%3FrecordId%3DrecXXX
+```
+
+| Param | Valores | Para qué |
+|---|---|---|
+| `modal` | ruta encoded (`%2F…`) | **Obligatorio.** Qué página se carga dentro del modal |
+| `modalSize` | `S` · `M` · `L` · `XL` | Ancho del modal |
+| `modalPlacement` | `center` · `top` | Posición vertical |
+
+### Construir la URL
+
+⚠️ **Usa `window.location.pathname`, no una ruta fija.** El truco de abrir sin recargar (abajo) solo funciona si el `pathname` de destino es **el mismo** que el actual. Si hardcodeas `/` y el bloque vive en `/kanban-prospectos`, el navegador hace una recarga completa y te manda al home con el modal encima.
+
+```js
+const PAGINA_DETALLE = "/detalle-prospectos";
+
+function buildModalUrl(recordId) {
+  const destino = PAGINA_DETALLE + "?recordId=" + recordId;
+  return (
+    window.location.pathname +
+    "?modalSize=L&modal=" + encodeURIComponent(destino) +
+    "&modalPlacement=center"
+  );
+}
+```
+
+### Abrir sin recargar la página
+
+`window.location.href = url` funciona, pero recarga todo el app (lento, y el kanban vuelve a cargar de cero). Si solo cambia el query string, se abre con `history.pushState` + un `popstate` sintético, que es lo que Softr escucha:
+
+```js
+function navigateNoReload(url) {
+  try {
+    const target = new URL(url, window.location.origin);
+    // Mismo origen Y mismo path → solo cambia el query: no hace falta recargar.
+    if (target.origin === window.location.origin && target.pathname === window.location.pathname) {
+      window.history.pushState({}, "", target.search + target.hash);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      return;
+    }
+  } catch (e) {}
+  // Otro path (u otra app) → navegación normal.
+  window.location.href = url;
+}
+```
+
+### Refrescar cuando el usuario cierra el modal
+
+Al cerrar el modal Softr quita los params de la URL, lo que dispara `popstate`. Ese es el gancho para recargar datos que hayan cambiado dentro del modal:
+
+```js
+useEffect(() => {
+  function onPop() { setTimeout(() => refetch(), 600); }
+  window.addEventListener("popstate", onPop);
+  return () => window.removeEventListener("popstate", onPop);
+}, []);
+```
+
+El `setTimeout` de ~600ms da tiempo a que Airtable termine de guardar lo último que se tocó en el modal antes de releer.
+
+### Después de crear un registro
+
+Si quieres abrir el modal del registro recién creado, espera un poco: el datasource del modal todavía no lo conoce y daría 404.
+
+```js
+if (nuevoId) setTimeout(() => navigateNoReload(buildModalUrl(nuevoId)), 700);
+```
+
+### Reglas
+
+| Regla | Por qué |
+|---|---|
+| `encodeURIComponent` sobre la ruta destino completa | El `?` y el `=` internos romperían el query string de afuera |
+| `window.location.pathname` como base | Sin esto no hay apertura sin recarga (ver arriba) |
+| La página destino debe existir y estar publicada | Si no, el modal abre en blanco o 404 |
+| La página destino lee su registro con `useCurrentRecordId()` | Es una página de detalle normal; el `recordId` le llega por su propio query |
+| Nada de `<a href>` | Regla general del bloque: usar `onClick` + la función de navegación |
+
+---
+
 ## Pre-delivery checklist
 
 Run through this before declaring a block done:
@@ -1396,3 +1674,21 @@ Run through this before declaring a block done:
 ## Reference files
 
 - `references/welldone-airtable-schema.md` — Complete schema for the Portal Empresarial Welldone Airtable base. Tables, field IDs, option IDs, known traps. **Load only when the user mentions Welldone or the base ID `appAEV0iaC3VfB5Zb`.**
+
+## Official documentation
+
+<https://docs.softr.io/vibe-coding-developer-guide>
+
+Softr's own guide for the Vibe Coding Block and the `@/lib/datasource` hooks.
+Worth re-fetching when something here looks incomplete or the platform seems to
+have changed — much of this skill was written before that page was consulted.
+
+Two caveats when using it:
+
+- **It is not exhaustive.** It documents `orderBy`/`where` without saying they
+  take the alias rather than the field name — a mistake that silently kills the
+  whole block. Several rules in this skill exist precisely because the docs
+  omitted them; when the docs and a tested behaviour disagree, trust the test.
+- **Softr's in-product AI does not reliably know its own docs.** Asked for the
+  `useRecords` signature it answered that it could not find it and pointed at
+  this URL. Fetch the page directly instead of relaying questions through it.
